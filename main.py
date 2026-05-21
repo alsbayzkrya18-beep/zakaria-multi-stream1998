@@ -22,12 +22,16 @@ bot = telebot.TeleBot(API_TOKEN)
 user_sessions = {}
 active_streams = {}
 
-# إعداد الـ Flask للخداع البرمجي وتخطي بورت Render المجاني
+# إعداد الـ Flask للخداع البرمجي وتخطي بورت Render
 app = Flask(__name__)
 
 @app.route('/')
 def home():
     return "Bot is alive and running clean! 🚀"
+
+@app.route('/health')
+def health():
+    return "OK", 200
 
 def start_polling():
     logging.info("Bot is starting polling in background thread...")
@@ -43,7 +47,7 @@ def start_polling():
 def start_command(message):
     chat_id = message.chat.id
     welcome_text = (
-        "🎬 **مرحباً بك في محرك زكريا برو المطور (النسخة النهائية النظيفة)!** 🚀\n\n"
+        "🎬 **مرحباً بك في محرك البث المطور!** 🚀\n\n"
         "أرسل رابط الفيديو أو البث المباشر الآن:"
     )
     bot.reply_to(message, welcome_text, parse_mode="Markdown")
@@ -85,7 +89,7 @@ def handle_messages(message):
         if url_match:
             clean_url = url_match.group(0)
             user_sessions[chat_id]['url'] = clean_url
-            bot.reply_to(message, f"✅ تم حفظ الرابط:\n`{clean_url}`\n\n📍 أرسل الآن رابط الـ RTMP الكامل (عنوان السيرفر + المفتاح الخاص بالفيسبوك):", parse_mode="Markdown")
+            bot.reply_to(message, f"✅ تم حفظ الرابط:\n`{clean_url}`\n\n📍 أرسل الآن رابط الـ RTMP الكامل (عنوان السيرفر + المفتاح الخاص بالفديو المباشر):", parse_mode="Markdown")
             user_sessions[chat_id]['step'] = 'WAITING_DEST'
         else:
             bot.reply_to(message, "❌ يرجى إرسال رابط صالح.")
@@ -151,7 +155,7 @@ def handle_messages(message):
                 return
 
             active_streams[chat_id] = {'process': process}
-            bot.send_message(chat_id, "🎯 **البث انطلق ويعمل الآن بنجاح!**\n\n📊 تفقد صفحة البث في فيسبوك الآن.\n\n🛑 لإيقاف البث في أي وقت أرسل: /stop")
+            bot.send_message(chat_id, "🎯 **البث انطلق ويعمل الآن بنجاح!**\n\n📊 تفقد صفحة البث في وجهتك الآن.\n\n🛑 لإيقاف البث في أي وقت أرسل: /stop")
 
         except subprocess.TimeoutExpired:
             bot.send_message(chat_id, "❌ استغرق فك التشفير وقتاً طويلاً جداً.")
@@ -168,7 +172,7 @@ if __name__ == "__main__":
     bot_thread.start()
     logging.info("Bot polling thread started.")
     
-    # 2. تشغيل سيرفر الـ Flask في الـ Main Thread لفتح البورت فوراً أمام Render وإنجاح الفحص
-    port = int(os.environ.get('PORT', 8080))
-    logging.info(f"Starting Flask server on port {port} to satisfy Render port check.")
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    # 2. تشغيل سيرفر الـ Flask مع قراءة المنفذ الديناميكي لـ Render بدقة واضحة
+    port = int(os.environ.get('PORT', 10000))
+    logging.info(f"Starting Flask server on port {port}")
+    app.run(host='0.0.0.0', port=port, debug=False)
