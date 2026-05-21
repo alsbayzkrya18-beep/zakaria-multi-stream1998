@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 API_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 if not API_TOKEN:
     logging.error("TELEGRAM_BOT_TOKEN is missing from environment variables!")
-    exit(1)
+    os._exit(1)
 
 bot = telebot.TeleBot(API_TOKEN)
 
@@ -22,7 +22,7 @@ bot = telebot.TeleBot(API_TOKEN)
 user_sessions = {}
 active_streams = {}
 
-# إعداد الـ Flask لفتح المنفذ والخداع البرمجي لمنصة Render المجانية
+# إعداد الـ Flask للخداع البرمجي وتخطي بورت Render المجاني
 app = Flask(__name__)
 
 @app.route('/')
@@ -30,15 +30,12 @@ def home():
     return "Bot is alive and running clean! 🚀"
 
 def run_flask():
-    # Render يمرر البورت تلقائياً عبر متغير البيئة PORT، وإذا لم يجده يستخدم 8080
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)
-
-def keep_alive():
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-    logging.info("Flask keep-alive server started successfully.")
+    try:
+        port = int(os.environ.get('PORT', 8080))
+        logging.info(f"Starting Flask on port {port}")
+        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    except Exception as e:
+        logging.error(f"Flask server error: {e}")
 
 @bot.message_handler(commands=['start', 'stream'])
 def start_command(message):
@@ -55,12 +52,16 @@ def stop_stream(message):
     chat_id = message.chat.id
     if chat_id in active_streams:
         process = active_streams[chat_id]['process']
-        process.terminate()
         try:
+            process.terminate()
             process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill() # قتل العملية بالقوة إذا لم تستجب للتوقف العادي
-        del active_streams[chat_id]
+        except Exception:
+            try:
+                process.kill()
+            except Exception:
+                pass
+        if chat_id in active_streams:
+            del active_streams[chat_id]
         bot.reply_to(message, "🛑 تم إيقاف البث بنجاح وتفريغ الذاكرة.")
     else:
         bot.reply_to(message, "❌ لا يوجد بث نشط حالياً.")
@@ -125,7 +126,7 @@ def handle_messages(message):
                     return
                 direct_url = direct_urls[-1]
 
-            # أمر FFmpeg الاحترافي المعدل والمقاوم للانقطاع والتقطيع الخاص بـ IPTV وعمل ريكونكت تلقائي
+            # أمر FFmpeg الاحترافي المقاوم لتقطيع الـ IPTV
             ffmpeg_cmd = [
                 "ffmpeg", 
                 "-reconnect", "1", "-reconnect_at_eof", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
@@ -141,7 +142,6 @@ def handle_messages(message):
 
             process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             
-            # مراقبة البث للتأكد من انطلاقه بنجاح
             time.sleep(8)
             if process.poll() is not None:
                 _, stderr = process.communicate()
@@ -160,14 +160,21 @@ def handle_messages(message):
             if chat_id in user_sessions:
                 del user_sessions[chat_id]
 
-if __name__ == "__main__":
-    keep_alive() # تشغيل سيرفر ويب Flask لفتح البورت وخداع الفحص (Port Scan)
+def start_polling():
     logging.info("Bot is starting polling...")
-    
-    # حلقة حماية ذكية لتخطي خطأ الـ Conflict 409 القديم نهائياً عند بدء التشغيل
     while True:
         try:
             bot.infinity_polling(none_stop=True, timeout=60, skip_pending=True)
         except Exception as e:
             logging.error(f"Polling error: {e}")
             time.sleep(5)
+
+if __name__ == "__main__":
+    # تشغيل سيرفر الـ Flask في خيط مستقل تماماً أولاً
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+    logging.info("Flask thread initiated.")
+    
+    # تشغيل البوت في الخيط الأساسي لمنع إغلاق السيرفر مفاجئاً
+    start_polling()
