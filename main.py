@@ -22,7 +22,7 @@ bot = telebot.TeleBot(API_TOKEN)
 user_sessions = {}
 active_streams = {}
 
-# إصلاح دالة keep_alive لتعمل بشكل صحيح على منصة Render
+# إعداد الـ Flask لفتح المنفذ والخداع البرمجي لمنصة Render المجانية
 app = Flask(__name__)
 
 @app.route('/')
@@ -30,6 +30,7 @@ def home():
     return "Bot is alive and running clean! 🚀"
 
 def run_flask():
+    # Render يمرر البورت تلقائياً عبر متغير البيئة PORT، وإذا لم يجده يستخدم 8080
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port)
 
@@ -124,9 +125,11 @@ def handle_messages(message):
                     return
                 direct_url = direct_urls[-1]
 
-            # أمر FFmpeg الاحترافي المطور الخاص بك للتوافق مع فيسبوك
+            # أمر FFmpeg الاحترافي المعدل والمقاوم للانقطاع والتقطيع الخاص بـ IPTV وعمل ريكونكت تلقائي
             ffmpeg_cmd = [
-                "ffmpeg", "-re", "-i", direct_url,
+                "ffmpeg", 
+                "-reconnect", "1", "-reconnect_at_eof", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
+                "-re", "-i", direct_url,
                 "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
                 "-b:v", "2000k", "-maxrate", "2000k", "-bufsize", "4000k",
                 "-pix_fmt", "yuv420p", "-g", "60", "-r", "30",
@@ -158,7 +161,7 @@ def handle_messages(message):
                 del user_sessions[chat_id]
 
 if __name__ == "__main__":
-    keep_alive() # تشغيل سيرفر ويب Flask بنجاح
+    keep_alive() # تشغيل سيرفر ويب Flask لفتح البورت وخداع الفحص (Port Scan)
     logging.info("Bot is starting polling...")
     
     # حلقة حماية ذكية لتخطي خطأ الـ Conflict 409 القديم نهائياً عند بدء التشغيل
