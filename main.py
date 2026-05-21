@@ -29,13 +29,15 @@ app = Flask(__name__)
 def home():
     return "Bot is alive and running clean! 🚀"
 
-def run_flask():
-    try:
-        port = int(os.environ.get('PORT', 8080))
-        logging.info(f"Starting Flask on port {port}")
-        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
-    except Exception as e:
-        logging.error(f"Flask server error: {e}")
+def start_polling():
+    logging.info("Bot is starting polling in background thread...")
+    while True:
+        try:
+            # تشغيل البوت مع تخطي الرسائل المعلقة القديمة لمنع التجميد
+            bot.infinity_polling(none_stop=True, timeout=60, skip_pending=True)
+        except Exception as e:
+            logging.error(f"Polling error: {e}")
+            time.sleep(5)
 
 @bot.message_handler(commands=['start', 'stream'])
 def start_command(message):
@@ -101,7 +103,6 @@ def handle_messages(message):
 
         try:
             direct_url = source_url
-            # فحص إذا كان الرابط يحتاج لـ yt-dlp
             if not any(ext in source_url.lower() for ext in ['.m3u8', '.mp4', '.mkv', '.ts', '.webm']):
                 logging.info(f"Attempting to extract direct URL for: {source_url}")
                 yt_dlp_cmd = [
@@ -126,7 +127,7 @@ def handle_messages(message):
                     return
                 direct_url = direct_urls[-1]
 
-            # أمر FFmpeg الاحترافي المقاوم لتقطيع الـ IPTV
+            # أمر FFmpeg المقاوم لتقطيع الـ IPTV
             ffmpeg_cmd = [
                 "ffmpeg", 
                 "-reconnect", "1", "-reconnect_at_eof", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
@@ -160,21 +161,14 @@ def handle_messages(message):
             if chat_id in user_sessions:
                 del user_sessions[chat_id]
 
-def start_polling():
-    logging.info("Bot is starting polling...")
-    while True:
-        try:
-            bot.infinity_polling(none_stop=True, timeout=60, skip_pending=True)
-        except Exception as e:
-            logging.error(f"Polling error: {e}")
-            time.sleep(5)
-
 if __name__ == "__main__":
-    # تشغيل سيرفر الـ Flask في خيط مستقل تماماً أولاً
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-    logging.info("Flask thread initiated.")
+    # 1. تشغيل البوت في خيط خلفي (Thread) أولاً حتى لا يعطل السيرفر الأساسي
+    bot_thread = threading.Thread(target=start_polling)
+    bot_thread.daemon = True
+    bot_thread.start()
+    logging.info("Bot polling thread started.")
     
-    # تشغيل البوت في الخيط الأساسي لمنع إغلاق السيرفر مفاجئاً
-    start_polling()
+    # 2. تشغيل سيرفر الـ Flask في الـ Main Thread لفتح البورت فوراً أمام Render وإنجاح الفحص
+    port = int(os.environ.get('PORT', 8080))
+    logging.info(f"Starting Flask server on port {port} to satisfy Render port check.")
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
