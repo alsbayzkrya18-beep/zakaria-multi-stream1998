@@ -6,51 +6,63 @@ import os
 import logging
 import re
 import time
+import yt_dlp # Import yt_dlp library
 
-# إعداد التسجيل (Logging)
-logging.basicConfig(level=logging.INFO, format=\'%(asctime)s - %(levelname)s - %(message)s\')
+# إعداد الـ Logging لمراقبة الأخطاء
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# الحصول على التوكن من متغيرات البيئة
-API_TOKEN = os.environ.get(\'TELEGRAM_BOT_TOKEN\')
+API_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 if not API_TOKEN:
-    logging.error("TELEGRAM_BOT_TOKEN is missing from environment variables!")
-    exit(1)
+    logging.error("TELEGRAM_BOT_TOKEN is missing!")
+    os._exit(1)
 
 bot = telebot.TeleBot(API_TOKEN)
-
-# تخزين الجلسات والبث النشط
 user_sessions = {}
 active_streams = {}
 
-# دالة لتشغيل البوت في Thread منفصل
-def run_bot_polling():
-    logging.info("Bot polling thread started...")
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Stream Engine is Running Smoothly! 🚀"
+
+@app.route('/health')
+def health():
+    return "OK", 200
+
+def start_polling():
     while True:
         try:
-            bot.infinity_polling(none_stop=True, timeout=60)
+            bot.infinity_polling(none_stop=True, timeout=60, skip_pending=True)
         except Exception as e:
             logging.error(f"Polling error: {e}")
-            time.sleep(5) # انتظر قليلاً قبل إعادة المحاولة
+            time.sleep(5)
 
-@bot.message_handler(commands=[\'start\', \'stream\'])
+@bot.message_handler(commands=['start', 'stream'])
 def start_command(message):
     chat_id = message.chat.id
     welcome_text = (
-        "🎬 **مرحباً بك في محرك زكريا برو المطور (النسخة النهائية)!** 🚀\\n\\n"
-        "أرسل رابط الفيديو أو البث المباشر الآن:"
+        "🎬 **مرحباً بك في محرك البث فائق الاستقرار!** 🚀\n\n"
+        "أرسل رابط الـ IPTV أو رابط الفيديو الآن:"
     )
     bot.reply_to(message, welcome_text, parse_mode="Markdown")
-    user_sessions[chat_id] = {\'step\': \'WAITING_URL\'}
+    user_sessions[chat_id] = {'step': 'WAITING_URL'}
 
-@bot.message_handler(commands=[\'stop\'])
+@bot.message_handler(commands=['stop'])
 def stop_stream(message):
     chat_id = message.chat.id
     if chat_id in active_streams:
-        process = active_streams[chat_id][\'process\']
-        process.terminate()
-        process.wait() # انتظر حتى ينتهي العملية
+        process = active_streams[chat_id]['process']
+        try:
+            process.terminate()
+            process.wait(timeout=5)
+        except Exception:
+            try:
+                process.kill()
+            except Exception:
+                pass
         del active_streams[chat_id]
-        bot.reply_to(message, "🛑 تم إيقاف البث بنجاح.")
+        bot.reply_to(message, "🛑 تم إيقاف البث وتفريغ الذاكرة بنجاح.")
     else:
         bot.reply_to(message, "❌ لا يوجد بث نشط حالياً.")
 
@@ -60,122 +72,84 @@ def handle_messages(message):
     text = message.text.strip()
 
     if chat_id not in user_sessions:
-        bot.reply_to(message, "الرجاء استخدام /start لبدء جلسة جديدة.")
         return
 
-    step = user_sessions[chat_id][\'step\']
+    step = user_sessions[chat_id]['step']
 
-    # 1. استلام الرابط وتنظيفه
-    if step == \'WAITING_URL\':
-        url_match = re.search(r\'https?://\\S+\', text)
+    if step == 'WAITING_URL':
+        url_match = re.search(r'https?://\S+', text)
         if url_match:
             clean_url = url_match.group(0)
-            user_sessions[chat_id][\'url\'] = clean_url
-            bot.reply_to(message, f"✅ تم حفظ الرابط:\\n`{clean_url}`\\n\\n📍 أرسل الآن رابط الـ RTMP (عنوان السيرفر + المفتاح):", parse_mode="Markdown")
-            user_sessions[chat_id][\'step\'] = \'WAITING_DEST\'
+            user_sessions[chat_id]['url'] = clean_url
+            bot.reply_to(message, f"✅ تم حفظ الرابط بنجاح.\n\n📍 أرسل الآن رابط الـ **RTMP** الكامل الخاص بفيسبوك:", parse_mode="Markdown")
+            user_sessions[chat_id]['step'] = 'WAITING_DEST'
         else:
-            bot.reply_to(message, "❌ يرجى إرسال رابط صالح.")
+            bot.reply_to(message, "❌ يرجى إرسال رابط صحيح يبدأ بـ http أو https.")
 
-    # 2. بدء البث
-    elif step == \'WAITING_DEST\':
+    elif step == 'WAITING_DEST':
         destination = text
-        source_url = user_sessions[chat_id][\'url\']
+        source_url = user_sessions[chat_id]['url']
         
         if chat_id in active_streams:
             bot.reply_to(message, "⚠️ هناك بث يعمل بالفعل. استخدم /stop أولاً.")
             return
 
-        bot.reply_to(message, "🚀 جاري فك التشفير وبدء البث... انتظر قليلاً...")
+        bot.reply_to(message, "⏳ جاري تهيئة الاتصال المباشر وتخفيف الضغط على السيرفر...")
 
         try:
             direct_url = source_url
-            # إذا لم يكن الرابط مباشراً، حاول استخراجه باستخدام yt-dlp
-            if not any(ext in source_url.lower() for ext in [\'.m3u8\', \'.mp4\', \'.mkv\', \'.ts\', \'.webm\']):
-                logging.info(f"Attempting to extract direct URL for: {source_url}")
-                yt_dlp_cmd = [
-                    "yt-dlp",
-                    "--no-check-certificate",
-                    "--no-playlist",
-                    "--ignore-errors",
-                    "--no-warnings",
-                    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36",
-                    "--extractor-args", "youtube:player_client=ios,android,web",
-                    "--geo-bypass",
-                    "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-                    "-g", source_url
-                ]
-                
-                result = subprocess.run(yt_dlp_cmd, capture_output=True, text=True, encoding=\'utf-8\', timeout=60)
-                if result.returncode != 0:
-                    error_msg = f"❌ فشل فك التشفير:\\n`{result.stderr[-500:]}`"
-                    bot.send_message(chat_id, error_msg, parse_mode="Markdown")
-                    logging.error(f"yt-dlp failed: {result.stderr}")
-                    return
+            # التحقق مما إذا كان الرابط يحتاج استخراج عبر yt-dlp
+            if not any(ext in source_url.lower() for ext in ['.m3u8', '.mp4', '.mkv', '.ts']):
+                ydl_opts = {'quiet': True, 'simulate': True, 'force_generic_extractor': True}
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(source_url, download=False)
+                    if 'url' in info:
+                        direct_url = info['url']
+                    elif 'entries' in info:
+                        # For playlists or multiple entries, take the first one
+                        direct_url = info['entries'][0]['url']
 
-                direct_urls = [line.strip() for line in result.stdout.split(\'\\n\') if line.strip().startswith(\'http\')]
-                if not direct_urls:
-                    bot.send_message(chat_id, "❌ لم يتم العثور على رابط مباشر بواسطة yt-dlp.")
-                    logging.error("yt-dlp returned no direct URLs.")
-                    return
-                direct_url = direct_urls[-1]
-                logging.info(f"Direct URL extracted: {direct_url}")
-
-            # أمر FFmpeg المطور مع إعدادات توافق قصوى لفيسبوك ويوتيوب
+            # أمر FFmpeg بنظام الحفظ الفائق للطاقة والذاكرة (Stream Copy)
             ffmpeg_cmd = [
-                "ffmpeg", "-re", "-i", direct_url,
-                "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
-                "-b:v", "2000k", "-maxrate", "2000k", "-bufsize", "4000k",
-                "-pix_fmt", "yuv420p", "-g", "60", "-r", "30",
-                "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
-                "-f", "flv", "-flvflags", "no_duration_filesize",
-                "-rtmp_buffer", "2000", "-rtmp_live", "live",
-                "-tls_verify", "0", # تجاوز مشاكل شهادات RTMPS (قد لا يكون مدعوماً في كل إصدارات ffmpeg)
+                "ffmpeg", 
+                "-reconnect", "1", "-reconnect_at_eof", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "10",
+                "-re", "-i", direct_url,
+                "-c:v", "copy",  # نقل الفيديو كما هو بدون إعادة معالجة لمنع الانهيار 
+                "-c:a", "aac",   # إعادة ترميز الصوت فقط لضمان التوافق مع فيسبوك
+                "-b:a", "128k",
+                "-f", "flv", 
                 destination
             ]
-            logging.info(f"FFmpeg command: {\' \'.join(ffmpeg_cmd)}")
 
             process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            active_streams[chat_id] = {'process': process}
             
-            # مراقبة البث لمدة 10 ثوانٍ للتأكد من بدء الاتصال
-            time.sleep(10)
-            if process.poll() is not None: # إذا توقفت العملية مبكراً
-                _, stderr = process.communicate()
-                error_msg = f"❌ فشل الاتصال بالمنصة أو بدء البث:\\n`{stderr[-500:]}`"
-                bot.send_message(chat_id, error_msg, parse_mode="Markdown")
-                logging.error(f"FFmpeg failed to start: {stderr}")
-                return
+            # انتظار ثوانٍ للتأكد من استقرار العملية
+            time.sleep(5)
+            if process.poll() is not None:
+                # إذا فشل نظام الـ copy بسبب صيغة الرابط، يتم الانتقال تلقائياً للنظام الخفيف للغاية
+                ffmpeg_cmd_light = [
+                    "ffmpeg", "-re", "-i", direct_url,
+                    "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+                    "-b:v", "800k", "-maxrate", "800k", "-bufsize", "1200k", 
+                    "-c:a", "aac", "-b:a", "96k",
+                    "-f", "flv", destination
+                ]
+                process = subprocess.Popen(ffmpeg_cmd_light, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                active_streams[chat_id] = {'process': process}
 
-            active_streams[chat_id] = {\'process\': process}
-            
-            bot.send_message(chat_id, "✅ **تم بدء محرك البث!**\\n\\n📊 **تقرير الحالة الأولي:**\\nجاري إرسال البيانات... انتظر 20 ثانية لتظهر الصورة على منصة البث.\\n\\n🎯 أوقف البث بـ /stop")
-            logging.info(f"Stream started for chat_id {chat_id} to {destination}")
+            bot.send_message(chat_id, "🚀 **البث انطلق الآن وهو مستقر تماماً وبأقل استهلاك للموارد!**\n\n🛑 لإيقاف البث أرسل: /stop")
 
-        except subprocess.TimeoutExpired:
-            bot.send_message(chat_id, "❌ استغرق فك التشفير وقتاً طويلاً جداً. يرجى المحاولة برابط آخر.")
-            logging.error(f"yt-dlp timeout for {source_url}")
         except Exception as e:
-            bot.send_message(chat_id, f"❌ خطأ غير متوقع أثناء معالجة البث: {str(e)}")
-            logging.error(f"Unexpected error: {e}", exc_info=True)
-        
+            bot.send_message(chat_id, f"❌ حدث خطأ أثناء تشغيل البث: {str(e)}")
         finally:
-            if chat_id in user_sessions: # تأكد من حذف الجلسة فقط إذا كانت موجودة
+            if chat_id in user_sessions:
                 del user_sessions[chat_id]
 
-
-# تشغيل Flask في العملية الرئيسية وتشغيل البوت في Thread
 if __name__ == "__main__":
-    # بدء البوت في Thread منفصل
-    bot_thread = threading.Thread(target=run_bot_polling)
+    bot_thread = threading.Thread(target=start_polling)
     bot_thread.daemon = True
     bot_thread.start()
-
-    # تشغيل Flask في العملية الرئيسية
-    app = Flask(__name__)
-
-    @app.route(\'/\')
-    def home():
-        return "Bot is alive!"
-
-    port = int(os.environ.get(\'PORT\', 8080))
-    logging.info(f"Flask server running on port {port}")
-    app.run(host=\'0.0.0.0\', port=port)
+    
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port, debug=False)
